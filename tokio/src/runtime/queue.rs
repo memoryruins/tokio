@@ -5,6 +5,7 @@ use crate::loom::sync::atomic::{AtomicU16, AtomicU32};
 use crate::loom::sync::Arc;
 use crate::runtime::task::{self, Inject};
 
+use std::convert::TryInto;
 use std::mem::MaybeUninit;
 use std::ptr;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
@@ -52,17 +53,6 @@ const LOCAL_QUEUE_CAPACITY: usize = 4;
 
 const MASK: usize = LOCAL_QUEUE_CAPACITY - 1;
 
-// Constructing the fixed size array directly is very awkward. The only way to
-// do it is to repeat `UnsafeCell::new(MaybeUninit::uninit())` 256 times, as
-// the contents are not Copy. The trick with defining a const doesn't work for
-// generic types.
-fn make_fixed_size<T>(buffer: Box<[T]>) -> Box<[T; LOCAL_QUEUE_CAPACITY]> {
-    assert_eq!(buffer.len(), LOCAL_QUEUE_CAPACITY);
-
-    // safety: We check that the length is correct.
-    unsafe { Box::from_raw(Box::into_raw(buffer).cast()) }
-}
-
 /// Create a new local run-queue
 pub(super) fn local<T: 'static>() -> (Steal<T>, Local<T>) {
     let mut buffer = Vec::with_capacity(LOCAL_QUEUE_CAPACITY);
@@ -74,7 +64,7 @@ pub(super) fn local<T: 'static>() -> (Steal<T>, Local<T>) {
     let inner = Arc::new(Inner {
         head: AtomicU32::new(0),
         tail: AtomicU16::new(0),
-        buffer: make_fixed_size(buffer.into_boxed_slice()),
+        buffer: buffer.into_boxed_slice().try_into().unwrap(),
     });
 
     let local = Local {
